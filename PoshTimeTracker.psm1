@@ -1,3 +1,6 @@
+using namespace System.Collections.Generic
+using namespace System.Linq
+
 param(
     [string]$EntriesSaveFilePath
 )
@@ -22,12 +25,12 @@ function Stop-Timer {
 function Get-TimerEntry {
     param (
         [string]$Tag,
-        [nullable[datetime]]$From,
-        [nullable[datetime]]$To
+        [nullable[DateTimeOffset]]$From,
+        [nullable[DateTimeOffset]]$To
     )
 
-    $Entries = $Global:StartTimerModule.ReadEntries();
-    [System.Linq.Enumerable]::Where($Entries, [Func[TimerEntry, bool]] {
+    $Entries = $Global:StartTimerModule.ReadEntries()
+    [Enumerable]::Where($Entries, [Func[TimerEntry, bool]] {
             param ($TimerEntry)
             return ($Tag -eq "" -or $Tag -eq $TimerEntry.Tag) -and
                    ($null -eq $From -or $From -le $TimerEntry.Start) -and
@@ -44,18 +47,41 @@ function Remove-TimerEntry {
     $Entry | Format-Table -Property *, Duration
 }
 
+function Update-TimerEntry {
+    param (
+        [int]$Id,
+        [string]$Tag,
+        [string]$Description,
+        [nullable[DateTimeOffset]]$Start,
+        [nullable[DateTimeOffset]]$End
+    )
+
+    $Entry = $Global:StartTimerModule.RemoveEntry($Id);
+    $Entry | Format-Table -Property *, Duration
+}
+
 Set-Alias -Name sat -Value Start-Timer
 Set-Alias -Name stt -Value Stop-Timer
 Set-Alias -Name gte -Value Get-TimerEntry
 Set-Alias -Name rte -Value Remove-TimerEntry
-Export-ModuleMember -Function Start-Timer, Stop-Timer, Get-TimerEntry, Remove-TimerEntry -Alias sat, stt, gte, rte
+
+Export-ModuleMember -Function Start-Timer, Stop-Timer, Get-TimerEntry, Remove-TimerEntry, Publish-TimerEntry
+Export-ModuleMember -Alias sat, stt, gte, rte
+
+class TimeTrackerPublisher {
+    [bool]Publish([TimerEntry]$TimerEntry) {
+        return $false;
+    }
+}
 
 class TimerEntry {
     [int]$Id
     [string]$Tag
     [string]$Description
-    [datetime]$Start
-    [nullable[datetime]]$End
+    [DateTimeOffset]$Start
+    [nullable[DateTimeOffset]]$End
+    [bool]$Published
+
     hidden [nullable[timespan]]$Duration
 
     TimerEntry([int]$Id, [string]$Tag, [string]$Description) {
@@ -64,6 +90,8 @@ class TimerEntry {
         $this.Description = $Description;
         $this.Start = Get-Date;
         $this.End = $null;
+        $this.Published = $false
+
         $this.Duration = $null
     }
 
@@ -71,15 +99,21 @@ class TimerEntry {
         $this.Id = [int]::Parse($Other.Id)
         $this.Tag = $Other.Tag
         $this.Description = $Other.Description
-        $this.Start = [datetime]::Parse($Other.Start)
+        $this.Start = [DateTimeOffset]::Parse($Other.Start)
         if ($null -ne $Other.End -and $Other.End -ne "") {
-            $this.End = [datetime]::Parse($Other.End)
+            $this.End = [DateTimeOffset]::Parse($Other.End)
             $this.Duration = $this.End - $this.Start
         }
         else {
             $this.End = $null
             $this.Duration = $null
         }
+        $this.Published = [bool]::Parse($Other.Published)
+    }
+
+    Stop() {
+        $this.End = Get-Date
+        $this.Duration = $this.End - $this.Start
     }
 }
 
@@ -90,15 +124,15 @@ class StartTimerModule {
         $this.EntriesSaveFilePath = $EntriesSaveFilePath
     }
 
-    [System.Collections.Generic.List[TimerEntry]]ReadEntries() {
+    [List[TimerEntry]]ReadEntries() {
         if (Test-Path -Path $this.EntriesSaveFilePath) {
             return Import-Csv -Path $this.EntriesSaveFilePath
         }
 
-        return [System.Collections.Generic.List[TimerEntry]]::new()
+        return [List[TimerEntry]]::new()
     }
 
-    WriteEntries([System.Collections.Generic.List[TimerEntry]] $Entries) {
+    WriteEntries([List[TimerEntry]]$Entries) {
         $Entries | Export-Csv -Path $this.EntriesSaveFilePath
     }
 
@@ -125,7 +159,8 @@ class StartTimerModule {
             return $null
         }
 
-        $LastEntry.End = Get-Date
+        $LastEntry.Stop()
+
         $this.WriteEntries($Entries)
         return $LastEntry
     }
@@ -133,7 +168,7 @@ class StartTimerModule {
     [TimerEntry]RemoveEntry([int]$Id) {
         $Entries = $this.ReadEntries()
         
-        $Entry = [System.Linq.Enumerable]::FirstOrDefault($Entries, [Func[TimerEntry, bool]] {
+        $Entry = [Enumerable]::FirstOrDefault($Entries, [Func[TimerEntry, bool]] {
                 param ($TimerEntry)
                 return $Id -eq $TimerEntry.Id
             })
@@ -142,5 +177,28 @@ class StartTimerModule {
         $this.WriteEntries($Entries)
 
         return $Entry
+    }
+
+    [List[TimerEntry]]PublishEntries([TimeTrackerPublisher]$Publisher) {
+        $Entries = $this.ReadEntries()
+        
+        if ($Entries.Count -eq 0) {
+            return $Entries
+        }
+
+        $FilteredEnties = [Enumerable]::Where($Entries, [Func[TimerEntry, bool]] {
+            param ($TimerEntry)
+            return $null -ne $TimerEntry.End -and -not $TimerEntry.Published
+        })
+
+        $PublishedEntries = [List[TimerEntry]]::new($FilteredEnties)
+
+        foreach ($Entry in $PublishedEntries) {
+            $Entry.Published = $Publisher.Publish($Entry)
+        }
+
+        $this.WriteEntries($Entries)
+
+        return $PublishedEntries
     }
 }
