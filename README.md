@@ -66,7 +66,7 @@ Start-Timer [-Tag <TAG>] [-Description <DESCRIPTION>]
 Stop-Timer
 ```
 
-### Get-Timer (gte)
+### Get-TimerEntry (gte)
 
 ```powershell
 Get-TimerEntry [-Tag <TAG>] [-From <FROM>] [-To <TO>]
