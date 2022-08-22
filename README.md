@@ -86,7 +86,8 @@ Remove-TimerEntry [-Id <ID>]
 ---
 JiraUri: "https://<ORGANIZATION>.atlassian.net"
 JiraUser: "<JIRA_USER>"
-JiraApiKey: "<API_KEY>" # https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/
+# https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/
+JiraApiKey: "<API_KEY>" # Optional! If not set the publish cmdlet will prompt the user for the credentials.
 ```
 
 ### Publish-TimerEntryToJira (pbtej)

@@ -1,4 +1,5 @@
 using namespace System.Text
+using namespace System.Management.Automation
 using module ./PoshTimeTracker.psm1
 
 param (
@@ -40,24 +41,30 @@ class JiraTimeTrackerPublisher : TimeTrackerPublisher {
         [uri]$Endpoint = "/rest/api/latest/issue/$JiraTicketId/worklog"
         [uri]$RequestUri = [uri]::new($this.Config.JiraUri, $Endpoint)
 
-        # Authorization needs to be a basic combination of the JiraUser:ApiToken.
-        $AuthBytes = [Encoding]::ASCII.GetBytes("$($this.Config.JiraUser):$($this.Config.JiraApiKey)")
-        $Auth = [Convert]::ToBase64String($AuthBytes)
-
-        $Headers = @{
-            "Authorization" = "Basic $Auth"
-        }
-
         $RequestBody = [JiraWorklLogRequestBody]::new($TimerEntry)
         $RequestBody = $RequestBody | ConvertTo-Json
 
+        # Create the credentials based on the api key set on configuration file.
+        if ($this.Config.JiraApiKey -eq "") {
+            $Credential = Get-Credential -UserName $this.Config.JiraUser -Title "Jira Credentials Request"
+        }
+        else {
+            # If no key is saved on the config file. Prompt the user for the key or passworm.
+            $SafeApiKey = ConvertTo-SecureString -String $this.Config.JiraApiKey -AsPlainText -Force
+            $Credential = [PSCredential]::new($this.Config.JiraUser, $SafeApiKey)
+        }
+
         try {
             Write-Host "Submiting Entry with id '$($TimerEntry.Id)' and tag '$($TimerEntry.Tag)'..."
-            Invoke-RestMethod -Uri $RequestUri `
-                -Method POST `
-                -ContentType "application/json" `
-                -Headers $Headers `
-                -Body $RequestBody
+
+            $Request = @{
+                Uri            = $RequestUri
+                ContentType    = "application/json"
+                Authentication = "Basic"
+                Credential     = $Credential
+                Body           = $RequestBody 
+            }
+            Invoke-RestMethod @Request
         }
         catch {
             $_ | Out-String | Write-Host
