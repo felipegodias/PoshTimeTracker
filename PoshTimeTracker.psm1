@@ -33,19 +33,52 @@ function Stop-Timer {
 function Get-TimerEntry {
     param (
         [string]$Tag, # The entry tag to be shown. If not set, show any.
+        [switch]$Today,
+        [switch]$Week,
         [nullable[DateTimeOffset]]$From, # Only Entries that started after FROM will be selected.
         [nullable[DateTimeOffset]]$To # Only entries that started before TO will be selected.
     )
 
+    $TodaysDate = [DateTime]::Now.Date
+
+    # Set From and To based on Today.
+    if ($Today) {
+        $From = $TodaysDate
+        $To = $TodaysDate.AddDays(1)
+    }
+
+    # Set From and To based on the week.
+    if ($Week) {
+        $From = $TodaysDate.AddDays(-$TodaysDate.DayOfWeek)
+        $To = $From.AddDays(7)
+    }
+
     $Entries = $Global:StartTimerModule.ReadEntries()
 
-    # Filter the entries then prints it to the screen.
-    [Enumerable]::Where($Entries, [Func[TimerEntry, bool]] {
+    # Filter the entries for the given time range.
+    $Entries = [Enumerable]::Where($Entries, [Func[TimerEntry, bool]] {
             param ($TimerEntry)
             return ($Tag -eq "" -or $Tag -eq $TimerEntry.Tag) -and
-                   ($null -eq $From -or $From -le $TimerEntry.Start) -and
-                   ($null -eq $To -or $To -ge $TimerEntry.Start)
-        }) | Format-Table -Property *, Duration
+                ($null -eq $From -or $From -le $TimerEntry.Start) -and
+                ($null -eq $To -or $To -ge $TimerEntry.Start)
+        }).ToArray()
+
+    # Sums up the duration from all filtered entries.
+    $TotalDuration = [timespan]::new(0)
+    foreach ($TimerEntry in $Entries) {
+        if ($null -ne $TimerEntry.Duration) {
+            $TotalDuration += $TimerEntry.Duration
+        }
+        else {
+            # If the entry is still running lets add for how long it is.
+            $TotalDuration += ([System.DateTimeOffset]::Now - $TimerEntry.Start)
+        }
+    }
+
+    Write-Host "Total Duration: $TotalDuration"
+
+    # Return the entries.
+    $Entries | Format-Table -Property *, Duration
 }
 
 # Removes a entry with the given id.
