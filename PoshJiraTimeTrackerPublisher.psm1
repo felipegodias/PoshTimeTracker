@@ -22,6 +22,7 @@ Export-ModuleMember -Function Publish-TimerEntryToJira -Alias pbtej
 # Jira publisher implementation for TimeTrackerPublisher abstraction.
 class JiraTimeTrackerPublisher : TimeTrackerPublisher {
     [JiraTimeTrackerPublisherConfig]$Config
+    [PSCredential] $Credential
 
     JiraTimeTrackerPublisher([string]$ConfigFilePath) {
         $ConfigFileContent = Get-Content -Path $ConfigFilePath
@@ -32,6 +33,16 @@ class JiraTimeTrackerPublisher : TimeTrackerPublisher {
 
         $ConfigFileYaml = $ConfigFileContent | ConvertFrom-Yaml
         $this.Config = [JiraTimeTrackerPublisherConfig]::new($ConfigFileYaml)
+
+        # Create the credentials based on the api key set on configuration file.
+        if ($this.Config.JiraApiKey -eq "") {
+            $this.Credential = Get-Credential -UserName $this.Config.JiraUser -Title "Jira Credentials Request"
+        }
+        else {
+            # If no key is saved on the config file. Prompt the user for the key or passworm.
+            $SafeApiKey = ConvertTo-SecureString -String $this.Config.JiraApiKey -AsPlainText -Force
+            $this.Credential = [PSCredential]::new($this.Config.JiraUser, $SafeApiKey)
+        }
     }
 
     # Publishes the given Entry to Jira. Returns true if the request was successfuly made; otherwise, false.
@@ -44,26 +55,19 @@ class JiraTimeTrackerPublisher : TimeTrackerPublisher {
         $RequestBody = [JiraWorklLogRequestBody]::new($TimerEntry)
         $RequestBody = $RequestBody | ConvertTo-Json
 
-        # Create the credentials based on the api key set on configuration file.
-        if ($this.Config.JiraApiKey -eq "") {
-            $Credential = Get-Credential -UserName $this.Config.JiraUser -Title "Jira Credentials Request"
-        }
-        else {
-            # If no key is saved on the config file. Prompt the user for the key or passworm.
-            $SafeApiKey = ConvertTo-SecureString -String $this.Config.JiraApiKey -AsPlainText -Force
-            $Credential = [PSCredential]::new($this.Config.JiraUser, $SafeApiKey)
-        }
-
         try {
             Write-Host "Submiting Entry with id '$($TimerEntry.Id)' and tag '$($TimerEntry.Tag)'..."
 
             $Request = @{
                 Uri            = $RequestUri
+                Method         = "POST"
                 ContentType    = "application/json"
                 Authentication = "Basic"
-                Credential     = $Credential
+                Credential     = $this.Credential
                 Body           = $RequestBody 
+                AllowUnencryptedAuthentication = $true
             }
+            
             Invoke-RestMethod @Request
         }
         catch {
